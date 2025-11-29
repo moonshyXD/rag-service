@@ -1,22 +1,42 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from settings import Settings, get_settings
 from schemas import (
     QueryRequest, ContextResponse,
     IndexRequest, IndexResponse,
-    HealthResponse
+    HealthResponse,
 )
 from rag import RAGService
-from functools import lru_cache
 import logging
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Хендлер жизненного цикла: автоиндексация при старте."""
+    settings: Settings = get_settings()
+    rag = RAGService(settings)
+    try:
+        count = rag.index_documents(
+            docs_path=settings.documents_path, 
+            force_reindex=False,
+        )
+        logger.info(f"Автоиндексация при старте: {count} фрагментов")
+    except Exception as e:
+        logger.error(f"Автоиндексация не удалась: {e}")
+    # даём приложению стартовать дальше
+    yield
+    # сюда можно добавить логику shutdown при необходимости
+
 
 app = FastAPI(
     title="RAG Service",
     description="Сервис для поиска контекста из базы знаний банка",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,  # ВАЖНО: передаём lifespan вместо @on_event
 )
 
 app.add_middleware(
@@ -120,5 +140,5 @@ if __name__ == "__main__":
         "main:app",
         host=settings.host,
         port=settings.port,
-        reload=True
+        reload=True,
     )
